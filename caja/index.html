@@ -234,6 +234,9 @@ function mensajeError(e) {
   if (/banned|user is banned/i.test(m)) return 'Este usuario está desactivado. Consultá con SR Gestoría.';
   if (/failed to fetch|network|load failed/i.test(m)) return 'Sin conexión. Probá de nuevo en un rato.';
   if (/row-level security|permission denied/i.test(m)) return 'No tenés permiso para hacer esto.';
+  if (/should be different/i.test(m)) return 'La contraseña nueva tiene que ser distinta de la actual.';
+  if (/password should be at least|weak password|password.*characters/i.test(m)) return 'La contraseña es muy corta o muy simple (mínimo 8 caracteres).';
+  if (/reauthenticat/i.test(m)) return 'Por seguridad, cerrá sesión, volvé a ingresar y probá de nuevo.';
   if (/JWT|token/i.test(m)) return 'La sesión venció. Volvé a ingresar.';
   return m || 'Ocurrió un error.';
 }
@@ -364,6 +367,38 @@ function demoActualizar(uid, cambios, actor) {
   demoRegistrarCambio(db, antes, m, actor);
   demoGuardar(db);
   return { ...m };
+}
+
+// Cambio de la propia contraseña (Supabase Auth)
+function validarClaveNueva(a, b) {
+  if (String(a || '').length < 8) return 'La contraseña tiene que tener al menos 8 caracteres.';
+  if (a !== b) return 'Las dos contraseñas no coinciden.';
+  return '';
+}
+function htmlFormClave() {
+  return `<form id="fClave" class="space-y-4" novalidate>
+    <div><label class="etq" for="kNueva">Contraseña nueva</label><input id="kNueva" type="password" class="campo" autocomplete="new-password" minlength="8"></div>
+    <div><label class="etq" for="kRepite">Repetila</label><input id="kRepite" type="password" class="campo" autocomplete="new-password"></div>
+    <label class="flex items-center gap-2 text-sm text-stone-600"><input type="checkbox" id="kVer"> Mostrar</label>
+    <p id="kError" class="text-rose-600 text-sm font-medium min-h-[1.25rem]"></p>
+    <button class="w-full bg-[#111] text-white font-bold rounded-xl py-3">Cambiar contraseña</button></form>`;
+}
+function enlazarFormClave(cliente, demo, alTerminar) {
+  $('#kVer').onchange = (e) => { $('#kNueva').type = $('#kRepite').type = e.target.checked ? 'text' : 'password'; };
+  setTimeout(() => $('#kNueva').focus(), 120);
+  ['#kNueva', '#kRepite'].forEach((x) => $(x).oninput = () => { $('#kError').textContent = ''; });
+  $('#fClave').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const a = $('#kNueva').value, b = $('#kRepite').value, err = validarClaveNueva(a, b);
+    if (err) { $('#kError').textContent = err; return; }
+    if (!demo && !navigator.onLine) { $('#kError').textContent = 'Necesitás conexión a internet para cambiar la contraseña.'; return; }
+    const btn = ev.submitter; if (btn) { btn.disabled = true; btn.textContent = 'Cambiando…'; }
+    try {
+      if (!demo) { const { error } = await cliente.auth.updateUser({ password: a }); if (error) throw error; }
+      alTerminar(); toast(demo ? 'En la demostración no se cambia de verdad, pero así funciona.' : 'Contraseña cambiada. La próxima vez ingresá con la nueva.');
+    } catch (e) { $('#kError').textContent = mensajeError(e); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = 'Cambiar contraseña'; } }
+  };
 }
 
 </script>
@@ -739,6 +774,7 @@ $('#hMenu').onclick = () => {
     <div class="space-y-2 pb-2">
       <button id="mSync" class="w-full text-left bg-white border border-stone-200 rounded-xl px-4 py-3 font-semibold">Actualizar ahora<span class="block text-xs font-normal text-stone-500">${S.ultSync ? 'Última actualización ' + hace(S.ultSync) : 'Todavía sin actualizar'}${S.pend.length ? ` · ${S.pend.length} por enviar` : ''}</span></button>
       <button id="mCuentas" class="w-full text-left bg-white border border-stone-200 rounded-xl px-4 py-3 font-semibold">Mis cuentas<span class="block text-xs font-normal text-stone-500">${(S.perfil.cuentas || []).filter((k) => k.activa).map((k) => esc(k.nombre)).join(' · ') || 'Sin cuentas cargadas'}</span></button>
+      <button id="mClave" class="w-full text-left bg-white border border-stone-200 rounded-xl px-4 py-3 font-semibold">Cambiar mi contraseña<span class="block text-xs font-normal text-stone-500">Por ejemplo, la provisoria que te mandó SR Gestoría</span></button>
       ${DEMO ? '<button id="mDemo" class="w-full text-left bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 font-semibold">Reiniciar datos de ejemplo</button>' : ''}
       <button id="mSalir" class="w-full text-left bg-white border border-rose-200 text-rose-700 rounded-xl px-4 py-3 font-semibold">${DEMO ? 'Cambiar de comercio' : 'Cerrar sesión'}</button>
     </div>
@@ -748,6 +784,10 @@ $('#hMenu').onclick = () => {
       <p class="text-[10px] text-stone-400 mt-2">${VERSION}</p>
     </div>`);
   $('#mSync').onclick = async () => { cerrarHoja(); await sincronizar(false); if (!DEMO) toast(navigator.onLine ? 'Datos actualizados.' : 'Sin señal: se actualiza cuando vuelva.', navigator.onLine ? 'ok' : 'aviso'); };
+  $('#mClave').onclick = () => {
+    abrirHoja(`<div class="flex items-center justify-between mb-4"><h3 class="text-xl font-bold">Cambiar mi contraseña</h3><button class="text-stone-500 text-sm font-semibold" data-cerrar>Cancelar</button></div>` + htmlFormClave() + '<div class="pb-4"></div>');
+    $('[data-cerrar]').onclick = cerrarHoja; enlazarFormClave(sb, DEMO, cerrarHoja);
+  };
   $('#mCuentas').onclick = () => toast('Las cuentas las administra SR Gestoría. Si falta alguna, avisale.', 'aviso', 4500);
   if ($('#mDemo')) $('#mDemo').onclick = () => { if (confirm('¿Volver a los datos de ejemplo originales?')) { demoReiniciar(); cerrarHoja(); traerDemo(); } };
   $('#mSalir').onclick = () => { cerrarHoja(); salir(); };

@@ -83,6 +83,7 @@
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
         <span id="hBadge" class="oculto absolute -top-0.5 -right-0.5 bg-amber-400 text-black text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1 grid place-items-center"></span>
       </button>
+      <button id="hClave" class="text-sm text-stone-300 hover:text-white px-2 py-1 whitespace-nowrap" title="Cambiar mi contraseña"><span class="hidden sm:inline">Mi contraseña</span><span class="sm:hidden" aria-label="Mi contraseña">🔑</span></button>
       <button id="hSalir" class="text-sm text-stone-300 hover:text-white px-2 py-1">Salir</button>
     </div>
     <nav class="max-w-[1500px] mx-auto px-4 lg:px-6 flex gap-6 overflow-x-auto" role="tablist">
@@ -284,6 +285,9 @@ function mensajeError(e) {
   if (/banned|user is banned/i.test(m)) return 'Este usuario está desactivado. Consultá con SR Gestoría.';
   if (/failed to fetch|network|load failed/i.test(m)) return 'Sin conexión. Probá de nuevo en un rato.';
   if (/row-level security|permission denied/i.test(m)) return 'No tenés permiso para hacer esto.';
+  if (/should be different/i.test(m)) return 'La contraseña nueva tiene que ser distinta de la actual.';
+  if (/password should be at least|weak password|password.*characters/i.test(m)) return 'La contraseña es muy corta o muy simple (mínimo 8 caracteres).';
+  if (/reauthenticat/i.test(m)) return 'Por seguridad, cerrá sesión, volvé a ingresar y probá de nuevo.';
   if (/JWT|token/i.test(m)) return 'La sesión venció. Volvé a ingresar.';
   return m || 'Ocurrió un error.';
 }
@@ -414,6 +418,38 @@ function demoActualizar(uid, cambios, actor) {
   demoRegistrarCambio(db, antes, m, actor);
   demoGuardar(db);
   return { ...m };
+}
+
+// Cambio de la propia contraseña (Supabase Auth)
+function validarClaveNueva(a, b) {
+  if (String(a || '').length < 8) return 'La contraseña tiene que tener al menos 8 caracteres.';
+  if (a !== b) return 'Las dos contraseñas no coinciden.';
+  return '';
+}
+function htmlFormClave() {
+  return `<form id="fClave" class="space-y-4" novalidate>
+    <div><label class="etq" for="kNueva">Contraseña nueva</label><input id="kNueva" type="password" class="campo" autocomplete="new-password" minlength="8"></div>
+    <div><label class="etq" for="kRepite">Repetila</label><input id="kRepite" type="password" class="campo" autocomplete="new-password"></div>
+    <label class="flex items-center gap-2 text-sm text-stone-600"><input type="checkbox" id="kVer"> Mostrar</label>
+    <p id="kError" class="text-rose-600 text-sm font-medium min-h-[1.25rem]"></p>
+    <button class="w-full bg-[#111] text-white font-bold rounded-xl py-3">Cambiar contraseña</button></form>`;
+}
+function enlazarFormClave(cliente, demo, alTerminar) {
+  $('#kVer').onchange = (e) => { $('#kNueva').type = $('#kRepite').type = e.target.checked ? 'text' : 'password'; };
+  setTimeout(() => $('#kNueva').focus(), 120);
+  ['#kNueva', '#kRepite'].forEach((x) => $(x).oninput = () => { $('#kError').textContent = ''; });
+  $('#fClave').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const a = $('#kNueva').value, b = $('#kRepite').value, err = validarClaveNueva(a, b);
+    if (err) { $('#kError').textContent = err; return; }
+    if (!demo && !navigator.onLine) { $('#kError').textContent = 'Necesitás conexión a internet para cambiar la contraseña.'; return; }
+    const btn = ev.submitter; if (btn) { btn.disabled = true; btn.textContent = 'Cambiando…'; }
+    try {
+      if (!demo) { const { error } = await cliente.auth.updateUser({ password: a }); if (error) throw error; }
+      alTerminar(); toast(demo ? 'En la demostración no se cambia de verdad, pero así funciona.' : 'Contraseña cambiada. La próxima vez ingresá con la nueva.');
+    } catch (e) { $('#kError').textContent = mensajeError(e); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = 'Cambiar contraseña'; } }
+  };
 }
 
 </script>
@@ -635,13 +671,13 @@ function opcionesGrafico(leyenda) {
   return {
     responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
     plugins: { legend: { display: leyenda, position: 'bottom', labels: { boxWidth: 12, usePointStyle: true } }, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${fmtPesos(c.parsed.y ?? c.parsed.x)}` } } },
-    scales: { x: { grid: { display: false }, ticks: { callback(v, i) { const l = this.getLabelForValue ? this.getLabelForValue(v) : v; return typeof l === 'number' ? fmtPesosCorto(l) : l; } } }, y: { grid: { color: '#f0efed' }, ticks: { callback: (v) => typeof v === 'number' ? fmtPesosCorto(v) : v } } },
+    scales: { x: { grid: { display: false }, ticks: { callback(v, i) { const l = this.getLabelForValue ? this.getLabelForValue(v) : v; return typeof l === 'number' ? fmtPesosCorto(l) : l; } } }, y: { beginAtZero: true, grid: { color: '#f0efed' }, ticks: { precision: 0, callback: (v) => typeof v === 'number' ? fmtPesosCorto(v) : v } } },
   };
 }
 function grafico(id, cfg) {
   if (typeof Chart === 'undefined') return;
   if (M.graficos[id]) M.graficos[id].destroy();
-  if (cfg.options.indexAxis === 'y') { cfg.options.scales = { x: { grid: { color: '#f0efed' }, ticks: { callback: (v) => fmtPesosCorto(v) } }, y: { grid: { display: false } } }; }
+  if (cfg.options.indexAxis === 'y') { cfg.options.scales = { x: { beginAtZero: true, grid: { color: '#f0efed' }, ticks: { precision: 0, callback: (v) => fmtPesosCorto(v) } }, y: { grid: { display: false } } }; }
   M.graficos[id] = new Chart($('#' + id), cfg);
 }
 
@@ -1115,6 +1151,7 @@ $('#fLogin').onsubmit = async (ev) => {
   } catch (e) { $('#lError').textContent = mensajeError(e); await sb.auth.signOut().catch(() => {}); }
   finally { btn.disabled = false; btn.textContent = 'Ingresar'; }
 };
+$('#hClave').onclick = () => { abrirVentana(cabecera('Cambiar mi contraseña', esc(M.yo?.email || '')) + htmlFormClave()); enlazarCerrar(); enlazarFormClave(sb, DEMO, cerrarVentana); };
 $('#hSalir').onclick = async () => { if (sb) await sb.auth.signOut().catch(() => {}); lsBorrar('srmesa_demo_in'); location.reload(); };
 
 (async function iniciar() {
