@@ -401,6 +401,18 @@ function enlazarFormClave(cliente, demo, alTerminar) {
   };
 }
 
+// Supabase devuelve como máximo 1000 filas por consulta: se piden de a bloques
+async function traerTodo(armar, bloque = 1000, tope = 200000) {
+  let todo = [];
+  for (let desde = 0; desde < tope; desde += bloque) {
+    const { data, error } = await armar().range(desde, desde + bloque - 1);
+    if (error) throw error;
+    todo = todo.concat(data || []);
+    if (!data || data.length < bloque) break;
+  }
+  return todo;
+}
+
 </script>
 <script>
 /* =========================================================================
@@ -461,8 +473,7 @@ async function sincronizar(silencioso = true) {
     }
     // 2) Bajar lo último (incluye correcciones hechas por la administración)
     const desde = sumarDias(fechaISO(), -60);
-    const { data, error } = await sb.from('movimientos').select('*').gte('fecha', desde).order('fecha').order('hora').limit(5000);
-    if (error) throw error;
+    const data = await traerTodo(() => sb.from('movimientos').select('*').gte('fecha', desde).order('fecha').order('hora').order('uid'));
     const nuevo = {};
     for (const m of data) nuevo[m.uid] = { ...m, monto: Number(m.monto) };
     for (const [u, m] of Object.entries(S.movs)) if (m.fecha < desde || S.pend.includes(u)) nuevo[u] = m;

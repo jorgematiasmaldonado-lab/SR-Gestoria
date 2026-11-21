@@ -452,6 +452,18 @@ function enlazarFormClave(cliente, demo, alTerminar) {
   };
 }
 
+// Supabase devuelve como máximo 1000 filas por consulta: se piden de a bloques
+async function traerTodo(armar, bloque = 1000, tope = 200000) {
+  let todo = [];
+  for (let desde = 0; desde < tope; desde += bloque) {
+    const { data, error } = await armar().range(desde, desde + bloque - 1);
+    if (error) throw error;
+    todo = todo.concat(data || []);
+    if (!data || data.length < bloque) break;
+  }
+  return todo;
+}
+
 </script>
 <script>
 /* =========================================================================
@@ -508,7 +520,7 @@ async function cargarTodo() {
         q(sb.from('comercios').select('*').order('nombre')),
         q(sb.from('cuentas').select('*').order('orden').order('nombre')),
         q(sb.from('perfiles').select('*').order('email')),
-        q(sb.from('movimientos').select('*').gte('fecha', M.desde).lte('fecha', M.hasta).order('fecha', { ascending: false }).order('hora', { ascending: false }).limit(20000)),
+        traerTodo(() => sb.from('movimientos').select('*').gte('fecha', M.desde).lte('fecha', M.hasta).order('fecha', { ascending: false }).order('hora', { ascending: false }).order('uid')),
         q(sb.from('avisos').select('*').order('cuando', { ascending: false }).limit(300)),
       ]);
       M.comercios = com; M.cuentas = cue; M.perfiles = per; M.avisos = avi;
@@ -767,7 +779,7 @@ $('#aLeidos').onchange = pintarAvisos;
 $('#aTodos').onclick = () => marcarLeidos(M.avisos.filter((a) => !a.leido).map((a) => a.id));
 
 /* ---------- Ventana ---------- */
-function abrirVentana(html) { $('#ventanaCont').innerHTML = html; $('#fondo').classList.remove('oculto'); $('#ventana').classList.remove('oculto'); $('#ventana').scrollTop = 0; }
+function abrirVentana(html, grande = false) { const v = $('#ventana'); v.style.width = grande ? 'min(1200px, 96vw)' : ''; v.style.height = grande && innerWidth >= 640 ? '92vh' : ''; v.style.maxHeight = grande ? '96vh' : ''; $('#ventanaCont').innerHTML = html; $('#fondo').classList.remove('oculto'); $('#ventana').classList.remove('oculto'); $('#ventana').scrollTop = 0; }
 function cerrarVentana() { $('#fondo').classList.add('oculto'); $('#ventana').classList.add('oculto'); }
 $('#fondo').onclick = cerrarVentana;
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarVentana(); });
@@ -854,7 +866,7 @@ function pintarComercios() {
     return `<div class="tarjeta p-4 ${c.activo ? '' : 'opacity-70'}">
       <div class="flex items-start gap-3"><div class="flex-1 min-w-0"><p class="font-bold text-lg leading-tight">${esc(c.nombre)} ${c.activo ? '' : '<span class="text-xs font-bold text-rose-600 uppercase">inactivo</span>'}</p>
         <p class="text-sm text-stone-600 num">${esc(c.titular)} · CUIL ${esc(c.cuil)}${c.telefono ? ' · Tel. ' + esc(c.telefono) : ''}</p></div>
-        <button class="btn btn-b text-xs" data-editcom="${esc(c.id)}">Editar datos</button></div>
+        <div class="flex gap-2"><button class="btn btn-b text-xs" data-editcom="${esc(c.id)}">Editar datos</button><button class="btn btn-r text-xs" data-delcom="${esc(c.id)}">Eliminar</button></div></div>
       <div class="mt-4"><div class="flex items-center justify-between"><p class="etq !mb-0">Cuentas</p><button class="text-xs font-semibold underline" data-nuevacta="${esc(c.id)}">+ Agregar cuenta</button></div>
         <div class="flex flex-wrap gap-2 mt-2">${ks.map((k) => `<button data-cta="${esc(k.id)}" class="text-sm rounded-lg border px-2.5 py-1 ${k.activa ? 'border-stone-300 bg-stone-50' : 'border-dashed border-stone-300 text-stone-400 line-through'}" title="Tocá para editar">${esc(k.nombre)}${k.detalle ? ` <span class="text-stone-500">· ${esc(k.detalle)}</span>` : ''}</button>`).join('') || '<span class="text-sm text-amber-700">Sin cuentas: no podrá cargar ventas por transferencia, tarjeta o QR.</span>'}</div></div>
       <div class="mt-4"><div class="flex items-center justify-between"><p class="etq !mb-0">Usuarios</p><button class="text-xs font-semibold underline" data-nuevousr="${esc(c.id)}">+ Agregar usuario</button></div>
@@ -866,13 +878,15 @@ function pintarComercios() {
   $$('[data-cta]').forEach((b) => b.onclick = () => { const k = cuentaDe(b.dataset.cta); formCuenta(k.comercio_id, k); });
   $$('[data-nuevousr]').forEach((b) => b.onclick = () => formUsuario(b.dataset.nuevousr));
   $$('[data-usr]').forEach((b) => b.onclick = () => accionUsuario(b.dataset.usr, b.dataset.acc));
+  $$('[data-delcom]').forEach((b) => b.onclick = () => eliminarComercio(M.comercios.find((c) => c.id === b.dataset.delcom)));
 }
 function filaUsuario(p) {
   const yo = p.user_id === M.yo.user_id;
   return `<div class="py-2 flex flex-wrap items-center gap-2 text-sm"><span class="flex-1 min-w-[180px]"><b>${esc(p.nombre || '')}</b> <span class="text-stone-500">${esc(p.email || '')}</span>${yo ? ' <span class="text-xs text-stone-400">(vos)</span>' : ''}
     ${p.activo ? '' : '<span class="text-xs font-bold text-rose-600 uppercase ml-1">desactivado</span>'}</span>
     ${yo ? '' : `<button class="text-xs font-semibold underline" data-usr="${esc(p.user_id)}" data-acc="clave">Cambiar contraseña</button>
-    <button class="text-xs font-semibold underline ${p.activo ? 'text-rose-700' : 'text-emerald-700'}" data-usr="${esc(p.user_id)}" data-acc="${p.activo ? 'desactivar' : 'reactivar'}">${p.activo ? 'Desactivar' : 'Reactivar'}</button>`}</div>`;
+    <button class="text-xs font-semibold underline ${p.activo ? 'text-rose-700' : 'text-emerald-700'}" data-usr="${esc(p.user_id)}" data-acc="${p.activo ? 'desactivar' : 'reactivar'}">${p.activo ? 'Desactivar' : 'Reactivar'}</button>
+    <button class="text-xs font-semibold underline text-stone-500" data-usr="${esc(p.user_id)}" data-acc="eliminar" title="Sólo si todavía no cargó nada">Eliminar</button>`}</div>`;
 }
 const claveAzar = () => { const a = 'abcdefghjkmnpqrstuvwxyz', n = '23456789'; let s = ''; for (let i = 0; i < 6; i++) s += a[Math.floor(Math.random() * a.length)]; s = s[0].toUpperCase() + s.slice(1); for (let i = 0; i < 4; i++) s += n[Math.floor(Math.random() * n.length)]; return s; };
 
@@ -901,6 +915,15 @@ function demoFuncionUsuarios(b) {
   else if (b.accion === 'crear_admin') { chkMail(); db.perfiles.push({ user_id: 'demo-a' + Date.now(), email: mail, nombre: b.nombre, rol: 'admin', comercio_id: null, activo: true }); }
   else if (b.accion === 'desactivar' || b.accion === 'reactivar') { const p = db.perfiles.find((x) => x.user_id === b.user_id); if (p) p.activo = b.accion === 'reactivar'; }
   else if (b.accion === 'cambiar_clave') { if (String(b.password || '').length < 8) throw new Error('La contraseña debe tener al menos 8 caracteres.'); }
+  else if (b.accion === 'eliminar_usuario') {
+    const n = db.movimientos.filter((m) => m.creado_por === b.user_id).length;
+    if (n) throw new Error(`Este usuario ya cargó ${n} movimiento${n > 1 ? 's' : ''}: no se puede eliminar. Desactivalo en su lugar.`);
+    db.perfiles = db.perfiles.filter((p) => p.user_id !== b.user_id);
+  } else if (b.accion === 'eliminar_comercio') {
+    const c = db.comercios.find((x) => x.id === b.comercio_id); if (!c || c.cuil !== b.cuil) throw new Error('El CUIL no coincide.');
+    const id = c.id; ['movimientos', 'cuentas', 'avisos', 'historial'].forEach((k) => db[k] = db[k].filter((x) => x.comercio_id !== id));
+    db.perfiles = db.perfiles.filter((p) => p.comercio_id !== id); db.comercios = db.comercios.filter((x) => x.id !== id);
+  }
   demoGuardar(db); return { ok: true };
 }
 
@@ -1021,11 +1044,54 @@ function accionUsuario(user_id, acc) {
     $('#cOk').onclick = async () => { const clave = $('#cNueva').value.trim(); try { await funcionUsuarios({ accion: 'cambiar_clave', user_id, password: clave }); mostrarCredenciales('Contraseña cambiada ✓', (p.nombre || '').split(' ')[0], p.email, clave); } catch (e) { $('#cErr2').textContent = mensajeError(e); } };
     return;
   }
+  if (acc === 'eliminar') {
+    abrirVentana(cabecera('Eliminar usuario', esc(p.email)) + `<p class="text-sm text-stone-600 mb-2">Se borra el usuario para siempre. Sólo se puede si <b>todavía no cargó ningún movimiento</b>; si ya cargó, conviene <b>desactivarlo</b> para no perder quién hizo cada carga.</p><p id="eErr" class="text-rose-600 text-sm min-h-[1.25rem]"></p>
+      <div class="flex justify-end gap-2"><button class="btn btn-b" data-cerrar>Cancelar</button><button id="eOk" class="btn bg-rose-600 text-white">Eliminar usuario</button></div>`);
+    enlazarCerrar();
+    $('#eOk').onclick = async () => { $('#eOk').disabled = true; try { await funcionUsuarios({ accion: 'eliminar_usuario', user_id }); await cargarTodo(); cerrarVentana(); toast('Usuario eliminado.'); } catch (e) { $('#eErr').textContent = mensajeError(e); } finally { $('#eOk').disabled = false; } };
+    return;
+  }
   const des = acc === 'desactivar';
   abrirVentana(cabecera(des ? 'Desactivar usuario' : 'Reactivar usuario', esc(p.email)) + `<p class="text-sm text-stone-600 mb-4">${des ? 'No va a poder ingresar más. Lo que cargó queda guardado.' : 'Va a poder volver a ingresar con su contraseña.'}</p><p id="dErr" class="text-rose-600 text-sm min-h-[1.25rem]"></p>
     <div class="flex justify-end gap-2"><button class="btn btn-b" data-cerrar>Cancelar</button><button id="dOk" class="btn ${des ? 'bg-rose-600 text-white' : 'btn-n'}">${des ? 'Desactivar' : 'Reactivar'}</button></div>`);
   enlazarCerrar();
   $('#dOk').onclick = async () => { try { await funcionUsuarios({ accion: acc, user_id }); await cargarTodo(); cerrarVentana(); toast(des ? 'Usuario desactivado.' : 'Usuario reactivado.'); } catch (e) { $('#dErr').textContent = mensajeError(e); } };
+}
+async function contarComercio(c) {
+  if (DEMO) { const db = demoDB(); return { movs: db.movimientos.filter((m) => m.comercio_id === c.id).length }; }
+  const { count, error } = await sb.from('movimientos').select('uid', { count: 'exact', head: true }).eq('comercio_id', c.id);
+  if (error) throw error; return { movs: count || 0 };
+}
+async function eliminarComercio(c) {
+  if (!c) return;
+  let n = { movs: '…' };
+  try { n = await contarComercio(c); } catch (e) { }
+  const us = M.perfiles.filter((p) => p.comercio_id === c.id), ks = M.cuentas.filter((k) => k.comercio_id === c.id);
+  abrirVentana(cabecera('Eliminar comercio', `${esc(c.nombre)} · ${esc(c.titular)} · CUIL ${esc(c.cuil)}`) + `
+    <div class="rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-sm p-4 mb-4"><b>Esto no se puede deshacer.</b> Se borra para siempre:
+      <ul class="list-disc pl-5 mt-2 num"><li><b>${n.movs}</b> movimientos (ventas y gastos) con su historial y avisos</li><li><b>${ks.length}</b> cuenta${ks.length === 1 ? '' : 's'}</li><li><b>${us.length}</b> usuario${us.length === 1 ? '' : 's'}${us.length ? ': ' + us.map((p) => esc(p.email)).join(', ') : ''}</li></ul>
+      <p class="mt-2">Si es un cliente real que deja de usar el sistema, conviene <b>desactivar</b> a sus usuarios en lugar de eliminar.</p></div>
+    <label class="flex items-center gap-2 text-sm mb-4"><input type="checkbox" id="xCopia" checked> Descargar antes una copia en Excel de todos sus movimientos (recomendado)</label>
+    <label class="etq" for="xCuil">Para confirmar, escribí el CUIL del comercio (${esc(c.cuil)})</label><input id="xCuil" class="campo num" inputmode="numeric" autocomplete="off" placeholder="XX-XXXXXXXX-X">
+    <p id="xErr" class="text-rose-600 text-sm min-h-[1.25rem] mt-2"></p>
+    <div class="flex justify-end gap-2"><button class="btn btn-b" data-cerrar>Cancelar</button><button id="xOk" class="btn bg-rose-600 text-white" disabled>Eliminar definitivamente</button></div>`);
+  enlazarCerrar();
+  $('#xCuil').oninput = (e) => { e.target.value = formatearCuil(e.target.value); $('#xOk').disabled = e.target.value !== c.cuil; $('#xOk').classList.toggle('opacity-40', e.target.value !== c.cuil); };
+  $('#xOk').classList.add('opacity-40');
+  $('#xOk').onclick = async () => {
+    const btn = $('#xOk'); btn.disabled = true; btn.textContent = 'Eliminando…'; $('#xErr').textContent = '';
+    try {
+      if ($('#xCopia').checked) {
+        if (typeof XLSX === 'undefined') throw new Error('No se pudo cargar el generador de Excel para la copia. Destildá la copia o revisá internet.');
+        const todos = DEMO ? demoDB().movimientos.filter((m) => m.comercio_id === c.id) : (await traerTodo(() => sb.from('movimientos').select('*').eq('comercio_id', c.id).order('fecha').order('hora').order('uid'))).map((m) => ({ ...m, monto: Number(m.monto) }));
+        const { wb } = armarExcel(todos);
+        XLSX.writeFile(wb, `COPIA_${c.nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w]+/g, '_')}_${c.cuil}_${fechaISO()}.xlsx`);
+      }
+      await funcionUsuarios({ accion: 'eliminar_comercio', comercio_id: c.id, cuil: c.cuil });
+      if (M.comercio === c.id) M.comercio = '';
+      await cargarTodo(); cerrarVentana(); toast(`"${c.nombre}" fue eliminado.`);
+    } catch (e) { $('#xErr').textContent = mensajeError(e); btn.disabled = false; btn.textContent = 'Eliminar definitivamente'; }
+  };
 }
 $('#bNuevoCom').onclick = () => formComercio();
 $('#bNuevoAdm').onclick = () => formUsuario(null);
@@ -1041,38 +1107,41 @@ function resumenPorComercio(lista) {
   const r = {}; lista.filter((m) => !m.anulado).forEach((m) => { const x = r[m.comercio_id] ||= { v: 0, g: 0, nv: 0, ng: 0, medios: {} }; if (m.tipo === 'venta') { x.v += Number(m.monto); x.nv++; x.medios[m.medio] = (x.medios[m.medio] || 0) + Number(m.monto); } else { x.g += Number(m.monto); x.ng++; } });
   return Object.entries(r).map(([id, x]) => ({ c: comercioDe(id), ...x })).sort((a, b) => a.c.nombre.localeCompare(b.c.nombre));
 }
-const nombreArchivo = (ext) => `SR_Gestoria_${M.comercio ? comercioDe(M.comercio).nombre.replace(/[^\wáéíóúñ]+/gi, '_') + '_' : ''}${M.desde}${M.desde !== M.hasta ? '_a_' + M.hasta : ''}.${ext}`;
+const nombreArchivo = (ext) => `SR_Gestoria_${M.comercio ? comercioDe(M.comercio).nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w]+/g, '_') + '_' : ''}${M.desde}${M.desde !== M.hasta ? '_a_' + M.hasta : ''}.${ext}`;
 
-$('#bExcel').onclick = () => {
-  if (typeof XLSX === 'undefined') { toast('No se pudo cargar el generador de Excel. Revisá internet.', 'error'); return; }
-  const lista = movsFiltrados(), wb = XLSX.utils.book_new();
+function armarExcel(lista) {
+  const wb = XLSX.utils.book_new();
   const res = resumenPorComercio(lista).map((r) => ({ Comercio: r.c.nombre, Titular: r.c.titular, CUIL: r.c.cuil, Ventas: r.v, 'Cant. ventas': r.nv, ...Object.fromEntries(Object.keys(MEDIOS).map((k) => [MEDIOS[k], r.medios[k] || 0])), Gastos: r.g, 'Cant. gastos': r.ng, Neto: r.v - r.g }));
-  const ws1 = XLSX.utils.json_to_sheet(res); ws1['!cols'] = [{ wch: 26 }, { wch: 20 }, { wch: 15 }, ...Array(10).fill({ wch: 15 })];
-  const ws2 = XLSX.utils.json_to_sheet(filasExport(lista)); ws2['!cols'] = [10, 7, 24, 20, 15, 8, 18, 18, 14, 30, 14, 11, 30].map((w) => ({ wch: w }));
+  const movs = filasExport(lista);
   const pc = {}; lista.filter((m) => !m.anulado && m.tipo === 'venta').forEach((m) => { const k = m.comercio_id + '|' + (m.cuenta_id ? nombreCuenta(m.cuenta_id) : 'Efectivo (caja)'); pc[k] = (pc[k] || 0) + Number(m.monto); });
-  const ws3 = XLSX.utils.json_to_sheet(Object.entries(pc).map(([k, v]) => { const [c, cu] = k.split('|'); return { Comercio: comercioDe(c).nombre, CUIL: comercioDe(c).cuil, Cuenta: cu, Ventas: v }; })); ws3['!cols'] = [{ wch: 26 }, { wch: 15 }, { wch: 22 }, { wch: 15 }];
-  [ws1, ws2, ws3].forEach((ws) => { const rg = XLSX.utils.decode_range(ws['!ref'] || 'A1'); for (let C = 0; C <= rg.e.c; C++) { const h = ws[XLSX.utils.encode_cell({ r: 0, c: C })]; if (h && /^Cant/.test(h.v)) continue; for (let R = 1; R <= rg.e.r; R++) { const cel = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (cel && cel.t === 'n') cel.z = '"$" #,##0.00'; } } });
-  XLSX.utils.book_append_sheet(wb, ws1, 'Resumen por comercio'); XLSX.utils.book_append_sheet(wb, ws2, 'Movimientos'); XLSX.utils.book_append_sheet(wb, ws3, 'Por cuenta');
-  XLSX.writeFile(wb, nombreArchivo('xlsx')); toast('Excel generado.');
-};
+  const cuentas = Object.entries(pc).map(([k, v]) => { const [c, cu] = k.split('|'); return { Comercio: comercioDe(c).nombre, CUIL: comercioDe(c).cuil, Cuenta: cu, Ventas: v }; });
+  const hojas = [{ nombre: 'Resumen por comercio', filas: res, anchos: [26, 20, 15, ...Array(10).fill(15)] }, { nombre: 'Movimientos', filas: movs, anchos: [10, 7, 24, 20, 15, 8, 18, 18, 14, 30, 14, 11, 30] }, { nombre: 'Por cuenta', filas: cuentas, anchos: [26, 15, 22, 15] }];
+  hojas.forEach((h) => {
+    const ws = XLSX.utils.json_to_sheet(h.filas); ws['!cols'] = h.anchos.map((w) => ({ wch: w }));
+    const rg = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    for (let C = 0; C <= rg.e.c; C++) { const hd = ws[XLSX.utils.encode_cell({ r: 0, c: C })]; if (hd && /^Cant/.test(hd.v)) continue; for (let R = 1; R <= rg.e.r; R++) { const cel = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (cel && cel.t === 'n') cel.z = '"$" #,##0.00'; } }
+    XLSX.utils.book_append_sheet(wb, ws, h.nombre);
+  });
+  return { wb, hojas };
+}
 
-$('#bPdf').onclick = () => {
-  if (!window.jspdf) { toast('No se pudo cargar el generador de PDF. Revisá internet.', 'error'); return; }
+function armarPDF(lista, opc = {}) {
   const { jsPDF } = window.jspdf, doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  const W = 297, H = 210, mg = 12, lista = movsFiltrados(), res = resumenPorComercio(lista);
+  const W = 297, H = 210, mg = 12, res = resumenPorComercio(lista);
   const vivos = lista.filter((m) => !m.anulado), tv = suma(vivos.filter((m) => m.tipo === 'venta')), tg = suma(vivos.filter((m) => m.tipo === 'gasto'));
   const plata = (n) => fmtPesos(n).replace('−', '-');
   const pdfTxt = (t) => String(t ?? '').replace(/→/g, '>').replace(/−/g, '-').replace(/[^\x00-\xFF…]/g, '');
+  const alcance = opc.alcance || (M.comercio ? comercioDe(M.comercio).nombre + ' (CUIL ' + comercioDe(M.comercio).cuil + ')' : 'Todos los comercios');
   let y = 0;
   const encabezado = () => {
     try { doc.addImage(LOGO_PDF, 'PNG', mg, 8, 52, 16); } catch (e) { }
     doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(17); doc.text('Reporte de ventas y gastos', W - mg, 13, { align: 'right' });
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(90);
-    doc.text(pdfTxt(`Período: ${M.desde === M.hasta ? fmtFecha(M.desde) : fmtFecha(M.desde) + ' al ' + fmtFecha(M.hasta)}  ·  ${M.comercio ? comercioDe(M.comercio).nombre + ' (CUIL ' + comercioDe(M.comercio).cuil + ')' : 'Todos los comercios'}`), W - mg, 19, { align: 'right' });
+    doc.text(pdfTxt(`Período: ${M.desde === M.hasta ? fmtFecha(M.desde) : fmtFecha(M.desde) + ' al ' + fmtFecha(M.hasta)}  ·  ${alcance}`), W - mg, 19, { align: 'right' });
     doc.text(`Generado el ${new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}`, W - mg, 24, { align: 'right' });
     doc.setDrawColor(17); doc.setLineWidth(0.5); doc.line(mg, 28, W - mg, 28); y = 35;
   };
-  const tabla = (cols, filas, opc = {}) => {
+  const tabla = (cols, filas) => {
     const alto = 6.2, anchos = cols.map((c) => c.w);
     const cab = () => { doc.setFillColor(240, 239, 236); doc.rect(mg, y - 4.3, W - 2 * mg, alto, 'F'); doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(70); let x = mg + 1.5; cols.forEach((c, i) => { doc.text(c.t, c.der ? x + anchos[i] - 3 : x, y, { align: c.der ? 'right' : 'left' }); x += anchos[i]; }); y += alto; };
     cab();
@@ -1088,7 +1157,6 @@ $('#bPdf').onclick = () => {
   };
   const titulo = (t) => { if (y > H - 30) { doc.addPage(); encabezado(); } doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(17); doc.text(t, mg, y); y += 6; };
   encabezado();
-  // Totales
   const cajas = [['VENTAS', plata(tv), [5, 150, 105]], ['GASTOS', plata(tg), [225, 29, 72]], ['NETO', plata(tv - tg), [17, 17, 17]], ['MOVIMIENTOS', String(lista.length) + (lista.some((m) => m.anulado) ? ` (${lista.filter((m) => m.anulado).length} anulados)` : ''), [17, 17, 17]]];
   const cw = (W - 2 * mg - 9) / 4;
   cajas.forEach(([t, v, col], i) => { const x = mg + i * (cw + 3); doc.setDrawColor(220); doc.setLineWidth(0.3); doc.roundedRect(x, y - 3, cw, 16, 2, 2); doc.setFontSize(7.5); doc.setTextColor(120); doc.setFont('helvetica', 'bold'); doc.text(t, x + 4, y + 2); doc.setFontSize(13); doc.setTextColor(...col); doc.text(v, x + 4, y + 9.5); });
@@ -1102,7 +1170,47 @@ $('#bPdf').onclick = () => {
     lista.map((m) => { const c = comercioDe(m.comercio_id); return { _gris: m.anulado, a: fmtFecha(m.fecha), b: fmtHora(m.hora), c: c.nombre, d: c.cuil, e: m.tipo === 'venta' ? 'Venta' : 'Gasto', f: conceptoDe(m), g: (m.tipo === 'gasto' ? '-' : '') + plata(m.monto), h: m.anulado ? 'ANULADO' : m.motivo ? 'Corregido' : '' }; }));
   const n = doc.getNumberOfPages();
   for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(140); doc.text('SR Gestoría · Gestoría integral y asesoría administrativa', mg, H - 6); doc.text('Desarrollado por JMM Gestiones & Tecnología', W / 2, H - 6, { align: 'center' }); doc.text(`Página ${i} de ${n}`, W - mg, H - 6, { align: 'right' }); }
-  doc.save(nombreArchivo('pdf')); toast('PDF generado.');
+  return { doc, paginas: n, tv, tg, res };
+}
+
+// Tabla HTML para las vistas previas
+function tablaPrevia(filas, max = 200) {
+  if (!filas.length) return '<p class="text-sm text-stone-500 p-6 text-center">Sin datos para este período y filtros.</p>';
+  const cols = Object.keys(filas[0]);
+  const fmt = (k, v) => typeof v === 'number' && !/^Cant/.test(k) ? fmtPesos(v) : esc(v);
+  return `<table class="t num"><thead><tr>${cols.map((c) => `<th class="${typeof filas[0][c] === 'number' ? 'text-right' : ''}">${esc(c)}</th>`).join('')}</tr></thead><tbody>${filas.slice(0, max).map((f) => `<tr class="!cursor-default">${cols.map((c) => `<td class="whitespace-nowrap ${typeof f[c] === 'number' ? 'text-right' : ''}">${fmt(c, f[c])}</td>`).join('')}</tr>`).join('')}</tbody></table>
+    ${filas.length > max ? `<p class="text-xs text-stone-500 p-3 text-center">Vista previa: se muestran ${max} de ${filas.length} filas. El archivo trae todas.</p>` : ''}`;
+}
+const pieVistaPrevia = (boton) => `<div class="flex flex-wrap items-center justify-end gap-2 mt-4 sticky bottom-0 bg-stone-50 py-3 border-t border-stone-200"><span class="text-xs text-stone-500 mr-auto">Todavía no se descargó nada.</span><button class="btn btn-b" data-cerrar>Cerrar</button>${boton}</div>`;
+
+$('#bExcel').onclick = () => {
+  if (typeof XLSX === 'undefined') { toast('No se pudo cargar el generador de Excel. Revisá internet.', 'error'); return; }
+  const lista = movsFiltrados(), { wb, hojas } = armarExcel(lista), nombre = nombreArchivo('xlsx');
+  abrirVentana(cabecera('Vista previa · Excel', `${esc(nombre)} · ${lista.length} movimientos · 3 hojas`) + `
+    <div class="flex gap-2 mb-3 flex-wrap" id="pvHojas">${hojas.map((h, i) => `<button class="pill" data-h="${i}" aria-pressed="${i === 0}">${esc(h.nombre)} (${h.filas.length})</button>`).join('')}</div>
+    <div class="tarjeta overflow-auto max-h-[62vh]" id="pvTabla">${tablaPrevia(hojas[0].filas)}</div>` + pieVistaPrevia('<button class="btn bg-emerald-700 text-white" id="pvBajar">Descargar Excel</button>'), true);
+  enlazarCerrar();
+  $$('#pvHojas [data-h]').forEach((b) => b.onclick = () => { $$('#pvHojas [data-h]').forEach((x) => x.setAttribute('aria-pressed', x === b)); $('#pvTabla').innerHTML = tablaPrevia(hojas[+b.dataset.h].filas); });
+  $('#pvBajar').onclick = () => { XLSX.writeFile(wb, nombre); cerrarVentana(); toast('Excel descargado.'); };
+};
+
+$('#bPdf').onclick = () => {
+  if (!window.jspdf) { toast('No se pudo cargar el generador de PDF. Revisá internet.', 'error'); return; }
+  const lista = movsFiltrados(), r = armarPDF(lista), nombre = nombreArchivo('pdf');
+  const visor = navigator.pdfViewerEnabled !== false && innerWidth >= 768;
+  let url = null;
+  const resumen = r.res.map((x) => ({ Comercio: x.c.nombre, CUIL: x.c.cuil, Ventas: x.v, Gastos: x.g, Neto: x.v - x.g }));
+  abrirVentana(cabecera('Vista previa · PDF', `${esc(nombre)} · ${r.paginas} página${r.paginas > 1 ? 's' : ''} · ${lista.length} movimientos`) +
+    (visor ? `<iframe id="pvPdf" class="w-full rounded-xl border border-stone-200 bg-white" style="height:calc(92vh - 190px)" title="Vista previa del PDF"></iframe>`
+      : `<div class="grid grid-cols-3 gap-2 mb-3 num text-sm"><div class="tarjeta p-3"><p class="etq">Ventas</p><b class="text-emerald-700">${fmtPesos(r.tv)}</b></div><div class="tarjeta p-3"><p class="etq">Gastos</p><b class="text-rose-700">${fmtPesos(r.tg)}</b></div><div class="tarjeta p-3"><p class="etq">Neto</p><b>${fmtPesos(r.tv - r.tg)}</b></div></div>
+         <p class="etq">Resumen por comercio</p><div class="tarjeta overflow-auto mb-3">${tablaPrevia(resumen)}</div>
+         <p class="etq">Movimientos</p><div class="tarjeta overflow-auto max-h-[40vh]">${tablaPrevia(lista.map((m) => ({ Fecha: fmtFechaCorta(m.fecha) + ' ' + fmtHora(m.hora), Comercio: comercioDe(m.comercio_id).nombre, Concepto: (m.tipo === 'venta' ? 'Venta · ' : 'Gasto · ') + conceptoDe(m), Monto: Number(m.monto), Estado: m.anulado ? 'Anulado' : '' })), 60)}</div>`) +
+    pieVistaPrevia('<button class="btn bg-emerald-700 text-white" id="pvBajar">Descargar PDF</button>'), true);
+  enlazarCerrar();
+  if (visor) { url = r.doc.output('bloburl'); $('#pvPdf').src = url + '#view=FitH'; }
+  const limpiar = () => { if (url) URL.revokeObjectURL(url); };
+  $$('#ventana [data-cerrar]').forEach((b) => b.addEventListener('click', limpiar));
+  $('#pvBajar').onclick = () => { r.doc.save(nombre); limpiar(); cerrarVentana(); toast('PDF descargado.'); };
 };
 
 /* ---------- Navegación ---------- */

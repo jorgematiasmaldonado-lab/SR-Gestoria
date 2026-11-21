@@ -1,5 +1,5 @@
 /* SR Gestoría · SR Mesa Central · funcionamiento sin señal */
-const CACHE = 'sr-mesa-v4';
+const CACHE = 'sr-mesa-v5';
 const PROPIOS = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 const CDN = [
   "https://cdn.tailwindcss.com/3.4.16",
