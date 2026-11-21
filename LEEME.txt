@@ -1,0 +1,11 @@
+SR GESTORÍA · Actualización v1.2
+Cuentas corrientes (fiado y cobros) + Pago dividido + Botón "Instalar app"
+
+ORDEN (importante):
+ 1) Supabase → SQL Editor → New query → pegar supabase/1_sr_actualizacion_v1_1.sql → Run.
+    No toca lo ya cargado. Al final muestra 4 filas (en 0 si todavía no se usó).
+ 2) Supabase → Edge Functions → sr-usuarios → Code → pegar supabase/2_sr-usuarios_index.ts → Deploy.
+ 3) GitHub: reemplazar index.html y sw.js de las carpetas caja y mesa → Commit → Push.
+ 4) Esperar 1-2 minutos y abrir las apps con internet (si están instaladas, cerrarlas y abrirlas de nuevo).
+
+Desarrollo: Jorge Matías Maldonado · JMM Gestiones & Tecnología · WhatsApp 3541 633175
